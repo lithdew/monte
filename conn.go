@@ -38,6 +38,7 @@ func (c *Conn) Write(buf []byte) error {
 	if err != nil {
 		return err
 	}
+	defer releasePendingWrite(pw)
 	pw.wg.Wait()
 	return nil
 }
@@ -56,7 +57,6 @@ func (c *Conn) preparePendingWrite(buf []byte, wait bool) (*pendingWrite, error)
 	}
 
 	pw := acquirePendingWrite(buf, wait)
-	defer releasePendingWrite(pw)
 
 	if wait {
 		pw.wg.Add(1)
