@@ -28,8 +28,6 @@ type Server struct {
 	mu   sync.Mutex
 	wg   sync.WaitGroup
 
-	lns []net.Listener
-
 	sem  chan struct{}
 	done chan struct{}
 }
@@ -72,27 +70,6 @@ func (s *Server) getMaxConnWaitTimeout() time.Duration {
 		return DefaultMaxConnWaitTimeout
 	}
 	return s.MaxConnWaitTimeout
-}
-
-func (s *Server) register(ln net.Listener) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.lns = append(s.lns, ln)
-}
-
-func (s *Server) deregister(ln net.Listener) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	entries := s.lns[:]
-
-	s.lns = s.lns[:0]
-	for i := 0; i < len(entries); i++ {
-		if entries[i] == ln {
-			continue
-		}
-		s.lns = append(s.lns, entries[i])
-	}
 }
 
 func (s *Server) serverAvailable() bool {
@@ -158,9 +135,6 @@ func (s *Server) client(conn net.Conn) error {
 func (s *Server) Serve(ln net.Listener) error {
 	s.once.Do(s.init)
 
-	s.register(ln)
-	defer s.deregister(ln)
-
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -201,13 +175,6 @@ func (s *Server) Serve(ln net.Listener) error {
 
 func (s *Server) Shutdown() {
 	s.once.Do(s.init)
-
-	s.mu.Lock()
-	for _, ln := range s.lns {
-		_ = ln.Close()
-	}
-	s.lns = nil
-	s.mu.Unlock()
 
 	close(s.done)
 	s.wg.Wait()
