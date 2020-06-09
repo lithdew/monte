@@ -49,7 +49,7 @@ func (c *Conn) WriteNoWait(buf []byte) error {
 }
 
 func (c *Conn) preparePendingWrite(buf []byte, wait bool) (*pendingWrite, error) {
-	c.mu.Unlock()
+	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.writerDone {
