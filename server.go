@@ -129,7 +129,7 @@ func (s *Server) client(conn net.Conn) error {
 		}
 	}
 
-	return s.getHandler().Handle(bufConn)
+	return s.getHandler().Handle(bufConn, s.done)
 }
 
 func (s *Server) Serve(ln net.Listener) error {

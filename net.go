@@ -3,14 +3,16 @@ package monte
 import "net"
 
 type Handler interface {
-	Handle(conn BufferedConn) error
+	Handle(conn BufferedConn, done chan struct{}) error
 }
 
-type HandlerFunc func(conn BufferedConn) error
+type HandlerFunc func(conn BufferedConn, done chan struct{}) error
 
-func (h HandlerFunc) Handle(conn BufferedConn) error {
-	return h(conn)
+func (h HandlerFunc) Handle(conn BufferedConn, done chan struct{}) error {
+	return h(conn, done)
 }
+
+var DefaultHandler HandlerFunc = func(conn BufferedConn, _ chan struct{}) error { return nil }
 
 type Handshaker interface {
 	Handshake(conn net.Conn) (BufferedConn, error)
@@ -21,8 +23,6 @@ type HandshakerFunc func(conn net.Conn) (BufferedConn, error)
 func (h HandshakerFunc) Handshake(conn net.Conn) (BufferedConn, error) {
 	return h(conn)
 }
-
-var DefaultHandler HandlerFunc = func(conn BufferedConn) error { return nil }
 
 var DefaultClientHandshaker HandshakerFunc = func(conn net.Conn) (BufferedConn, error) {
 	session, err := NewSession()

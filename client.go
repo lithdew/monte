@@ -27,8 +27,49 @@ type Client struct {
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
 
-	mu    sync.Mutex
-	conns []BufferedConn
+	mu  sync.Mutex
+	ccs []*clientConn
+}
+
+type clientConn struct {
+	Addr string
+
+	Handler    Handler
+	Handshaker Handshaker
+
+	MaxConns int
+
+	ReadBufferSize  int
+	WriteBufferSize int
+
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+}
+
+func (c *Client) getClientConn() *clientConn {
+	if len(c.ccs) == 0 {
+		return c.createClientConn()
+	}
+	//cc := c.ccs[0]
+	//for i := 1; i < len(c.ccs); i++ {
+	//
+	//}
+	return c.createClientConn()
+}
+
+func (c *Client) createClientConn() *clientConn {
+	cc := &clientConn{
+		Addr:            c.Addr,
+		Handler:         c.getHandler(),
+		Handshaker:      c.getHandshaker(),
+		MaxConns:        c.getMaxConns(),
+		ReadBufferSize:  c.getReadBufferSize(),
+		WriteBufferSize: c.getWriteBufferSize(),
+		ReadTimeout:     c.getReadTimeout(),
+		WriteTimeout:    c.getWriteTimeout(),
+	}
+	c.ccs = append(c.ccs, cc)
+	return cc
 }
 
 func (c *Client) getHandler() Handler {
