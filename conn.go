@@ -58,7 +58,9 @@ func (c *Conn) preparePendingWrite(buf []byte, wait bool) (*pendingWrite, error)
 	pw := acquirePendingWrite(buf, wait)
 	defer releasePendingWrite(pw)
 
-	pw.wg.Add(1)
+	if wait {
+		pw.wg.Add(1)
+	}
 
 	c.writerQueue = append(c.writerQueue, pw)
 	c.writerCond.Signal()
