@@ -75,6 +75,7 @@ func (c *Client) SendNoWait(buf []byte) error {
 
 func (c *Client) Request(dst, buf []byte) ([]byte, error) {
 	c.once.Do(c.init)
+
 	cc := c.getClientConn()
 
 	<-cc.ready
@@ -85,13 +86,23 @@ func (c *Client) Request(dst, buf []byte) ([]byte, error) {
 	return cc.conn.Request(dst, buf)
 }
 
+func (c *Client) NumPendingWrites() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	n := 0
+	for _, cc := range c.conns {
+		n += cc.conn.NumPendingWrites()
+	}
+	return n
+}
+
 func (c *Client) Shutdown() {
 	c.once.Do(c.init)
 
-	shutdown := func() {
+	c.shutdown.Do(func() {
 		close(c.done)
-	}
-	c.shutdown.Do(shutdown)
+	})
 }
 
 func (c *Client) init() {
