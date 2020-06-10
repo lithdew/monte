@@ -33,11 +33,11 @@ func TestClientHandshakeTimeout(t *testing.T) {
 	}()
 
 	for i := 0; i < attempts; i++ {
-		require.Error(t, client.Write([]byte("hello\n")))
+		require.Error(t, client.Send([]byte("hello\n")))
 	}
 }
 
-func TestEndToEnd(t *testing.T) {
+func TestClientEndToEnd(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	ln, err := net.Listen("tcp", ":0")
@@ -70,7 +70,7 @@ func TestEndToEnd(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			for j := 0; j < m; j++ {
-				require.NoError(t, client.Write([]byte(fmt.Sprintf("[%d] hello %d", i, j))))
+				require.NoError(t, client.Send([]byte(fmt.Sprintf("[%d] hello %d", i, j))))
 				atomic.AddUint32(&c, ^uint32(0))
 			}
 		}(i)
@@ -79,7 +79,7 @@ func TestEndToEnd(t *testing.T) {
 	wg.Wait()
 }
 
-func BenchmarkWrite(b *testing.B) {
+func BenchmarkSend(b *testing.B) {
 	ln, err := net.Listen("tcp", ":0")
 	require.NoError(b, err)
 
@@ -107,14 +107,14 @@ func BenchmarkWrite(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		err := client.Write(buf)
+		err := client.Send(buf)
 		if err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func BenchmarkWriteNoWait(b *testing.B) {
+func BenchmarkSendNoWait(b *testing.B) {
 	ln, err := net.Listen("tcp", ":0")
 	require.NoError(b, err)
 
@@ -142,14 +142,14 @@ func BenchmarkWriteNoWait(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		err := client.WriteNoWait(buf)
+		err := client.SendNoWait(buf)
 		if err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func BenchmarkWriteNoWaitParallel(b *testing.B) {
+func BenchmarkSendParallel(b *testing.B) {
 	ln, err := net.Listen("tcp", ":0")
 	require.NoError(b, err)
 
@@ -178,7 +178,7 @@ func BenchmarkWriteNoWaitParallel(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			err := client.WriteNoWait(buf)
+			err := client.Send(buf)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -186,7 +186,7 @@ func BenchmarkWriteNoWaitParallel(b *testing.B) {
 	})
 }
 
-func BenchmarkWriteParallel(b *testing.B) {
+func BenchmarkSendNoWaitParallel(b *testing.B) {
 	ln, err := net.Listen("tcp", ":0")
 	require.NoError(b, err)
 
@@ -215,7 +215,7 @@ func BenchmarkWriteParallel(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			err := client.Write(buf)
+			err := client.SendNoWait(buf)
 			if err != nil {
 				b.Fatal(err)
 			}

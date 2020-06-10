@@ -45,7 +45,7 @@ type Client struct {
 	conns []*clientConn
 }
 
-func (c *Client) Write(buf []byte) error {
+func (c *Client) Send(buf []byte) error {
 	c.once.Do(c.init)
 
 	cc := c.getClientConn()
@@ -55,10 +55,10 @@ func (c *Client) Write(buf []byte) error {
 		return cc.err
 	}
 
-	return cc.conn.Write(buf)
+	return cc.conn.Send(buf)
 }
 
-func (c *Client) WriteNoWait(buf []byte) error {
+func (c *Client) SendNoWait(buf []byte) error {
 	c.once.Do(c.init)
 	cc := c.getClientConn()
 
@@ -67,7 +67,19 @@ func (c *Client) WriteNoWait(buf []byte) error {
 		return cc.err
 	}
 
-	return cc.conn.WriteNoWait(buf)
+	return cc.conn.SendNoWait(buf)
+}
+
+func (c *Client) Request(dst, buf []byte) ([]byte, error) {
+	c.once.Do(c.init)
+	cc := c.getClientConn()
+
+	<-cc.ready
+	if cc.err != nil {
+		return nil, cc.err
+	}
+
+	return cc.conn.Request(dst, buf)
 }
 
 func (c *Client) Shutdown() {

@@ -2,6 +2,8 @@ package monte
 
 import (
 	"fmt"
+	"github.com/lithdew/bytesutil"
+	"github.com/valyala/bytebufferpool"
 	"io"
 	"sync"
 	"time"
@@ -25,7 +27,7 @@ type Conn struct {
 	seq  uint32
 }
 
-func (c *Conn) Write(buf []byte) error {
+func (c *Conn) write(buf []byte) error {
 	c.once.Do(c.init)
 	pw, err := c.preparePendingWrite(buf, true)
 	if err != nil {
@@ -36,7 +38,7 @@ func (c *Conn) Write(buf []byte) error {
 	return pw.err
 }
 
-func (c *Conn) WriteNoWait(buf []byte) error {
+func (c *Conn) writeNoWait(buf []byte) error {
 	c.once.Do(c.init)
 	_, err := c.preparePendingWrite(buf, false)
 	return err
@@ -99,6 +101,61 @@ func (c *Conn) Handle(done chan struct{}, conn BufferedConn) error {
 func (c *Conn) init() {
 	c.reqs = make(map[uint32]*pendingRequest)
 	c.writerCond.L = &c.mu
+}
+
+func (c *Conn) Send(payload []byte) error {
+	buf := bytebufferpool.Get()
+	defer bytebufferpool.Put(buf)
+
+	buf.B = bytesutil.AppendUint32BE(buf.B, 0)
+	buf.B = append(buf.B, payload...)
+
+	return c.write(buf.B)
+}
+
+func (c *Conn) SendNoWait(payload []byte) error {
+	buf := bytebufferpool.Get()
+	defer bytebufferpool.Put(buf)
+
+	buf.B = bytesutil.AppendUint32BE(buf.B, 0)
+	buf.B = append(buf.B, payload...)
+
+	return c.writeNoWait(buf.B)
+}
+
+func (c *Conn) Request(dst []byte, payload []byte) ([]byte, error) {
+	buf := bytebufferpool.Get()
+
+	seq := c.next()
+
+	buf.B = bytesutil.AppendUint32BE(buf.B, seq)
+	buf.B = append(buf.B, payload...)
+
+	pr := acquirePendingRequest(dst)
+	defer releasePendingRequest(pr)
+
+	pr.wg.Add(1)
+
+	c.mu.Lock()
+	c.reqs[seq] = pr
+	c.mu.Unlock()
+
+	err := c.write(buf.B)
+
+	bytebufferpool.Put(buf)
+
+	if err != nil {
+		pr.wg.Done()
+
+		c.mu.Lock()
+		delete(c.reqs, seq)
+		c.mu.Unlock()
+		return nil, err
+	}
+
+	pr.wg.Wait()
+
+	return dst, nil
 }
 
 func (c *Conn) preparePendingWrite(buf []byte, wait bool) (*pendingWrite, error) {
@@ -220,8 +277,31 @@ func (c *Conn) readLoop(conn BufferedConn) error {
 			break
 		}
 
-		_ = buf[:n]
-		//fmt.Println(string(buf))
+		data := buf[:n]
+		if len(data) < 4 {
+			return fmt.Errorf("no seq num attached to msg: %w", err)
+		}
+
+		seq := bytesutil.Uint32BE(data)
+		data = data[4:]
+
+		c.mu.Lock()
+		pr, exists := c.reqs[seq]
+		if exists {
+			delete(c.reqs, seq)
+		}
+		c.mu.Unlock()
+
+		if seq == 0 || !exists {
+			continue
+		}
+
+		// received response
+
+		pr.dst = bytesutil.ExtendSlice(pr.dst, len(data))
+		copy(pr.dst, data)
+
+		pr.wg.Done()
 	}
 
 	return err
@@ -239,35 +319,23 @@ func (c *Conn) close(err error) {
 			releasePendingWrite(pw)
 		}
 	}
-}
 
-type pendingWrite struct {
-	buf  []byte
-	wait bool
-	err  error
-	wg   sync.WaitGroup
-}
+	c.writerQueue = nil
 
-var pendingWritePool sync.Pool
+	for seq := range c.reqs {
+		pr := c.reqs[seq]
+		pr.wg.Done()
 
-func acquirePendingWrite(buf []byte, wait bool) *pendingWrite {
-	v := pendingWritePool.Get()
-	if v == nil {
-		v = &pendingWrite{}
+		delete(c.reqs, seq)
+		releasePendingRequest(pr)
 	}
-	wi := v.(*pendingWrite)
-	wi.buf = buf
-	wi.wait = wait
-	return wi
-}
 
-func releasePendingWrite(wi *pendingWrite) {
-	pendingWritePool.Put(wi)
+	c.seq = 0
 }
 
 type pendingRequest struct {
-	dst []byte
-	wg  sync.WaitGroup
+	dst []byte         // dst to copy response to
+	wg  sync.WaitGroup // signals the caller that the response has been received
 }
 
 var pendingRequestPool sync.Pool
@@ -277,11 +345,35 @@ func acquirePendingRequest(dst []byte) *pendingRequest {
 	if v == nil {
 		v = &pendingRequest{}
 	}
-	wi := v.(*pendingRequest)
-	wi.dst = dst
-	return wi
+	pr := v.(*pendingRequest)
+	pr.dst = dst
+	return pr
 }
 
-func releasePendingRequest(wi *pendingRequest) {
-	pendingRequestPool.Put(wi)
+func releasePendingRequest(pr *pendingRequest) {
+	pendingRequestPool.Put(pr)
+}
+
+type pendingWrite struct {
+	buf  []byte         // payload
+	wait bool           // signal to caller if they're waiting
+	err  error          // keeps track of any socket errors on write
+	wg   sync.WaitGroup // signals the caller that this write is complete
+}
+
+var pendingWritePool sync.Pool
+
+func acquirePendingWrite(buf []byte, wait bool) *pendingWrite {
+	v := pendingWritePool.Get()
+	if v == nil {
+		v = &pendingWrite{}
+	}
+	pw := v.(*pendingWrite)
+	pw.buf = buf
+	pw.wait = wait
+	return pw
+}
+
+func releasePendingWrite(pw *pendingWrite) {
+	pendingWritePool.Put(pw)
 }
