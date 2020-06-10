@@ -25,14 +25,14 @@ The bare minimum for high performance, fully-encrypted RPC over TCP in Go.
 3. Multiply X25519 curve scalar with X25519 curve point received from our peer.
 4. Derive a shared key by using BLAKE-2b as a key derivation function over our scalar point multiplication result.
 5. Encrypt further communication with AES 256-bit GCM using our shared key, with a nonce counter increasing for every
-incoming/outgoing meessage.
+incoming/outgoing message.
 
 ### Message Format
 
 1. Encrypted messages are prefixed with an unsigned 32-bit integer denoting the message's length.
-2. The decoded message content is prefixed with an unsigned 32-bit integer designating a sequence number. The sequence
-number is used as an identifier to identify requests/responses from one another.
-3. The sequence number 0 is reserved for requests that do not expect a response.
+2. The decoded message content is prefixed with an unsigned 32-bit integer designating a sequence number.
+3. The sequence number is used as an identifier to identify requests/responses from one another.
+4. The sequence number 0 is reserved for requests that do not expect a response.
 
 ## Benchmarks
 
