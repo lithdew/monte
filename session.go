@@ -71,18 +71,17 @@ func (s *SessionConn) Read(b []byte) (int, error) {
 }
 
 func (s *SessionConn) Write(b []byte) (int, error) {
-	s.wb = bytesutil.ExtendSlice(s.wb, s.suite.NonceSize())
+	s.wb = bytesutil.ExtendSlice(s.wb, s.suite.NonceSize()+len(b)+s.suite.Overhead())
 	binary.BigEndian.PutUint64(s.wb[:8], s.wn)
-	for i := 8; i < len(s.wb); i++ {
+	for i := 8; i < s.suite.NonceSize(); i++ {
 		s.wb[i] = 0
 	}
 	s.wn++
 
-	s.wb = append(s.wb, b...)
 	s.wb = s.suite.Seal(
 		s.wb[s.suite.NonceSize():s.suite.NonceSize()],
 		s.wb[:s.suite.NonceSize()],
-		s.wb[s.suite.NonceSize():],
+		b,
 		nil,
 	)
 
