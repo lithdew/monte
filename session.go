@@ -28,6 +28,7 @@ type SessionConn struct {
 	bw *bufio.Writer
 	br *bufio.Reader
 
+	rb []byte // read buffer
 	wb []byte // write buffer
 	wn uint64 // write nonce
 	rn uint64 // read nonce
@@ -45,25 +46,28 @@ func NewSessionConn(suite cipher.AEAD, conn net.Conn) *SessionConn {
 
 func (s *SessionConn) Read(b []byte) (int, error) {
 	var err error
-	b, err = ReadSized(b[:0], s.br, cap(b))
+	s.rb, err = ReadSized(s.rb[:0], s.br, cap(b))
 	if err != nil {
 		return 0, err
 	}
 
-	b = bytesutil.ExtendSlice(b, len(b)+s.suite.NonceSize())
-	binary.BigEndian.PutUint64(b[len(b)-s.suite.NonceSize():], s.rn)
+	s.rb = bytesutil.ExtendSlice(s.rb, len(s.rb)+s.suite.NonceSize())
+	for i := len(s.rb) - s.suite.NonceSize(); i < len(s.rb); i++ {
+		s.rb[i] = 0
+	}
+	binary.BigEndian.PutUint64(s.rb[len(s.rb)-s.suite.NonceSize():], s.rn)
 	s.rn++
 
-	b, err = s.suite.Open(
-		b[:0],
-		b[len(b)-s.suite.NonceSize():],
-		b[:len(b)-s.suite.NonceSize()],
+	s.rb, err = s.suite.Open(
+		s.rb[:0],
+		s.rb[len(s.rb)-s.suite.NonceSize():],
+		s.rb[:len(s.rb)-s.suite.NonceSize()],
 		nil,
 	)
 	if err != nil {
 		return 0, err
 	}
-	return len(b), err
+	return copy(b, s.rb), err
 }
 
 func (s *SessionConn) Write(b []byte) (int, error) {

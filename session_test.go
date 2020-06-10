@@ -56,7 +56,7 @@ func TestSessionConn(t *testing.T) {
 		require.NoError(t, aliceConn.Flush())
 	}()
 
-	buf := make([]byte, 0, 1024)
+	buf := make([]byte, 1024)
 
 	for i := 0; i < trials; i++ {
 		n, err := bobConn.Read(buf)

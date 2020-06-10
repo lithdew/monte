@@ -31,12 +31,12 @@ func Write(w io.Writer, buf []byte) error {
 }
 
 func ReadSized(dst []byte, r io.Reader, max int) ([]byte, error) {
-	var buf [4]byte
-	_, err := io.ReadFull(r, buf[:])
+	dst = bytesutil.ExtendSlice(dst, 4)
+	_, err := io.ReadFull(r, dst[:])
 	if err != nil {
 		return nil, err
 	}
-	n := bytesutil.Uint32BE(buf[:])
+	n := bytesutil.Uint32BE(dst[:])
 	if int(n) > max {
 		return nil, fmt.Errorf("max is %d bytes, got %d bytes", max, n)
 	}

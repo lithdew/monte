@@ -2,18 +2,6 @@ package monte
 
 import "net"
 
-type Handler interface {
-	Handle(done chan struct{}, conn BufferedConn) error
-}
-
-type HandlerFunc func(done chan struct{}, conn BufferedConn) error
-
-func (h HandlerFunc) Handle(done chan struct{}, conn BufferedConn) error {
-	return h(done, conn)
-}
-
-var DefaultHandler HandlerFunc = func(_ chan struct{}, conn BufferedConn) error { return nil }
-
 type Handshaker interface {
 	Handshake(conn net.Conn) (BufferedConn, error)
 }

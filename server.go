@@ -14,13 +14,17 @@ var DefaultHandshakeTimeout = 3 * time.Second
 var DefaultMaxConnWaitTimeout = 3 * time.Second
 
 type Server struct {
-	Handler    Handler
-	Handshaker Handshaker
+	Handshaker       Handshaker
+	HandshakeTimeout time.Duration
 
-	MaxConns int
-
-	HandshakeTimeout   time.Duration
+	MaxConns           int
 	MaxConnWaitTimeout time.Duration
+
+	ReadBufferSize  int
+	WriteBufferSize int
+
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
 
 	once sync.Once
 	mu   sync.Mutex
@@ -35,25 +39,11 @@ func (s *Server) init() {
 	s.done = make(chan struct{})
 }
 
-func (s *Server) getHandler() Handler {
-	if s.Handler == nil {
-		return DefaultHandler
-	}
-	return s.Handler
-}
-
 func (s *Server) getHandshaker() Handshaker {
 	if s.Handshaker == nil {
 		return DefaultServerHandshaker
 	}
 	return s.Handshaker
-}
-
-func (s *Server) getMaxConns() int {
-	if s.MaxConns <= 0 {
-		return DefaultMaxServerConns
-	}
-	return s.MaxConns
 }
 
 func (s *Server) getHandshakeTimeout() time.Duration {
@@ -63,11 +53,46 @@ func (s *Server) getHandshakeTimeout() time.Duration {
 	return s.HandshakeTimeout
 }
 
+func (s *Server) getMaxConns() int {
+	if s.MaxConns <= 0 {
+		return DefaultMaxServerConns
+	}
+	return s.MaxConns
+}
+
 func (s *Server) getMaxConnWaitTimeout() time.Duration {
 	if s.MaxConnWaitTimeout <= 0 {
 		return DefaultMaxConnWaitTimeout
 	}
 	return s.MaxConnWaitTimeout
+}
+
+func (s *Server) getReadTimeout() time.Duration {
+	if s.ReadTimeout <= 0 {
+		return DefaultReadTimeout
+	}
+	return s.ReadTimeout
+}
+
+func (s *Server) getWriteTimeout() time.Duration {
+	if s.WriteTimeout <= 0 {
+		return DefaultWriteTimeout
+	}
+	return s.WriteTimeout
+}
+
+func (s *Server) getReadBufferSize() int {
+	if s.ReadBufferSize <= 0 {
+		return DefaultReadBufferSize
+	}
+	return s.ReadBufferSize
+}
+
+func (s *Server) getWriteBufferSize() int {
+	if s.WriteBufferSize <= 0 {
+		return DefaultWriteBufferSize
+	}
+	return s.WriteBufferSize
 }
 
 func (s *Server) serverAvailable() bool {
@@ -127,7 +152,16 @@ func (s *Server) client(conn net.Conn) error {
 		}
 	}
 
-	return s.getHandler().Handle(s.done, bufConn)
+	cc := &Conn{
+		ReadBufferSize:  s.getReadBufferSize(),
+		WriteBufferSize: s.getWriteBufferSize(),
+		ReadTimeout:     s.getReadTimeout(),
+		WriteTimeout:    s.getWriteTimeout(),
+	}
+
+	cc.close(cc.Handle(s.done, bufConn))
+
+	return nil
 }
 
 func (s *Server) Serve(ln net.Listener) error {

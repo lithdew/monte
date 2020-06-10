@@ -54,11 +54,13 @@ func (c *Conn) Handle(done chan struct{}, conn BufferedConn) error {
 	writerDone := make(chan error)
 	go func() {
 		writerDone <- c.writeLoop(conn)
+		close(writerDone)
 	}()
 
 	readerDone := make(chan error)
 	go func() {
 		readerDone <- c.readLoop(conn)
+		close(readerDone)
 	}()
 
 	var err error
@@ -74,6 +76,7 @@ func (c *Conn) Handle(done chan struct{}, conn BufferedConn) error {
 			<-readerDone
 		}
 	case err = <-writerDone:
+		c.closeWriter()
 		conn.Close()
 		if err == nil {
 			err = <-readerDone
@@ -217,9 +220,8 @@ func (c *Conn) readLoop(conn BufferedConn) error {
 			break
 		}
 
-		buf = buf[:n]
-
-		// TODO
+		_ = buf[:n]
+		//fmt.Println(string(buf))
 	}
 
 	return err
@@ -237,12 +239,6 @@ func (c *Conn) close(err error) {
 			releasePendingWrite(pw)
 		}
 	}
-	c.writerQueue = nil
-	c.writerDone = false
-	for seq := range c.reqs {
-		delete(c.reqs, seq)
-	}
-	c.seq = 0
 }
 
 type pendingWrite struct {
