@@ -31,6 +31,75 @@ type Conn struct {
 	seq  uint32
 }
 
+func (c *Conn) NumPendingWrites() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.writerQueue)
+}
+
+func (c *Conn) Write(buf []byte) error {
+	c.once.Do(c.init)
+
+	pw, err := c.preparePendingWrite(buf, true)
+	if err != nil {
+		return err
+	}
+	defer releasePendingWrite(pw)
+	pw.wg.Wait()
+	return nil
+}
+
+func (c *Conn) WriteNoWait(buf []byte) error {
+	c.once.Do(c.init)
+
+	_, err := c.preparePendingWrite(buf, false)
+	return err
+}
+
+func (c *Conn) Handle(conn BufferedConn, done chan struct{}) error {
+	c.once.Do(c.init)
+
+	writerDone := make(chan error)
+	readerDone := make(chan error)
+
+	go func() {
+		writerDone <- c.writeLoop(conn)
+	}()
+
+	go func() {
+		readerDone <- c.readLoop(conn)
+	}()
+
+	var err error
+
+	select {
+	case <-done:
+		c.mu.Lock()
+		c.writerDone = true
+		c.writerCond.Signal()
+		c.mu.Unlock()
+
+		<-writerDone
+		conn.Close()
+		<-readerDone
+	case err = <-writerDone:
+		conn.Close()
+		<-readerDone
+	case err = <-readerDone:
+		c.mu.Lock()
+		c.writerDone = true
+		c.writerCond.Signal()
+		c.mu.Unlock()
+
+		<-writerDone
+		conn.Close()
+	}
+
+	c.clearPendingWrites()
+
+	return err
+}
+
 func (c *Conn) init() {
 	c.reqs = make(map[uint32]*pendingRequest)
 	c.writerCond.L = &c.mu
@@ -85,25 +154,6 @@ func (c *Conn) getWriteTimeout() time.Duration {
 	return c.WriteTimeout
 }
 
-func (c *Conn) Write(buf []byte) error {
-	c.once.Do(c.init)
-
-	pw, err := c.preparePendingWrite(buf, true)
-	if err != nil {
-		return err
-	}
-	defer releasePendingWrite(pw)
-	pw.wg.Wait()
-	return nil
-}
-
-func (c *Conn) WriteNoWait(buf []byte) error {
-	c.once.Do(c.init)
-
-	_, err := c.preparePendingWrite(buf, false)
-	return err
-}
-
 func (c *Conn) preparePendingWrite(buf []byte, wait bool) (*pendingWrite, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -133,50 +183,6 @@ func (c *Conn) next() uint32 {
 		c.seq = 1
 	}
 	return c.seq
-}
-
-func (c *Conn) Handle(conn BufferedConn, done chan struct{}) error {
-	c.once.Do(c.init)
-
-	writerDone := make(chan error)
-	readerDone := make(chan error)
-
-	go func() {
-		writerDone <- c.writeLoop(conn)
-	}()
-
-	go func() {
-		readerDone <- c.readLoop(conn)
-	}()
-
-	var err error
-
-	select {
-	case <-done:
-		c.mu.Lock()
-		c.writerDone = true
-		c.writerCond.Signal()
-		c.mu.Unlock()
-
-		<-writerDone
-		conn.Close()
-		<-readerDone
-	case err = <-writerDone:
-		conn.Close()
-		<-readerDone
-	case err = <-readerDone:
-		c.mu.Lock()
-		c.writerDone = true
-		c.writerCond.Signal()
-		c.mu.Unlock()
-
-		<-writerDone
-		conn.Close()
-	}
-
-	c.clearPendingWrites()
-
-	return err
 }
 
 func (c *Conn) writeLoop(conn BufferedConn) error {

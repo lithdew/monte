@@ -65,15 +65,32 @@ func (c *Client) getConn() *Conn {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// TODO(kenta): multiple conns
-
 	if len(c.conns) == 0 {
-		return c.createConn()
+		return c.newConn()
 	}
-	return c.conns[0]
+
+	mc := c.conns[0]
+	mp := mc.NumPendingWrites()
+	if mp == 0 {
+		return mc
+	}
+	for i := 1; i < len(c.conns); i++ {
+		cc := c.conns[i]
+		cp := cc.NumPendingWrites()
+		if cp == 0 {
+			return cc
+		}
+		if cp < mp {
+			mc, mp = cc, cp
+		}
+	}
+	if len(c.conns) < c.getMaxConns() {
+		return c.newConn()
+	}
+	return mc
 }
 
-func (c *Client) createConn() *Conn {
+func (c *Client) newConn() *Conn {
 	cc := &Conn{
 		Addr:            c.Addr,
 		Handler:         c.getHandler(),
