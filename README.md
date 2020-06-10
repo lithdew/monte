@@ -1,6 +1,6 @@
 # monte
 
-The bare minimum for fully-encrypted RPC networking over TCP in Go.
+The bare minimum for high performance, fully-encrypted RPC over TCP in Go.
 
 ## Protocol
 
