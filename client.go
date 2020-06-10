@@ -1,12 +1,12 @@
 package monte
 
 import (
-	"net"
 	"sync"
 	"time"
 )
 
 var DefaultMaxClientConns = 4
+var DefaultNumDialAttempts = 1
 var DefaultReadBufferSize = 4096
 var DefaultWriteBufferSize = 4096
 var DefaultReadTimeout = 3 * time.Second
@@ -17,17 +17,19 @@ var DefaultWriteTimeout = 3 * time.Second
 type Client struct {
 	Addr string
 
-	Handler    Handler
-	Handshaker Handshaker
+	Handler Handler
 
-	MaxConns int
+	Handshaker       Handshaker
+	HandshakeTimeout time.Duration
+
+	MaxConns        int
+	NumDialAttempts int
 
 	ReadBufferSize  int
 	WriteBufferSize int
 
-	HandshakeTimeout time.Duration
-	ReadTimeout      time.Duration
-	WriteTimeout     time.Duration
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
 
 	once     sync.Once
 	shutdown sync.Once
@@ -35,48 +37,16 @@ type Client struct {
 	done chan struct{}
 
 	mu    sync.Mutex
-	conns []*Conn
+	conns []*clientConn
 }
 
 func (c *Client) Write(buf []byte) error {
 	c.once.Do(c.init)
-
-	cc := c.getConn()
-
-	go func() error { // TODO(kenta): cleanup, dial on first Write()/WriteNoWait()
-		conn, err := net.Dial("tcp", c.Addr)
-		if err != nil {
-			return err
-		}
-
-		timeout := c.getHandshakeTimeout()
-
-		if timeout != 0 {
-			err := conn.SetDeadline(time.Now().Add(timeout))
-			if err != nil {
-				return err
-			}
-		}
-
-		bufConn, err := c.getHandshaker().Handshake(conn)
-		if err != nil {
-			return err
-		}
-
-		err = cc.Handle(c.done, bufConn)
-		if err != nil {
-			return err
-		}
-
-		return nil
-	}()
-
-	return cc.Write(buf)
+	return c.getConn().Write(buf)
 }
 
 func (c *Client) WriteNoWait(buf []byte) error {
 	c.once.Do(c.init)
-
 	return c.getConn().WriteNoWait(buf)
 }
 
@@ -93,7 +63,27 @@ func (c *Client) init() {
 	c.done = make(chan struct{})
 }
 
-func (c *Client) getConn() *Conn {
+func (c *Client) newConn() *clientConn {
+	cc := &clientConn{
+		Addr:             c.Addr,
+		Handler:          c.getHandler(),
+		Handshaker:       c.getHandshaker(),
+		HandshakeTimeout: c.getHandshakeTimeout(),
+
+		done: c.done,
+
+		conn: &Conn{
+			ReadBufferSize:  c.getReadBufferSize(),
+			WriteBufferSize: c.getWriteBufferSize(),
+			ReadTimeout:     c.getReadTimeout(),
+			WriteTimeout:    c.getWriteTimeout(),
+		},
+	}
+	c.conns = append(c.conns, cc)
+	return cc
+}
+
+func (c *Client) getConn() *clientConn {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -122,21 +112,6 @@ func (c *Client) getConn() *Conn {
 	return mc
 }
 
-func (c *Client) newConn() *Conn {
-	cc := &Conn{
-		Addr:            c.Addr,
-		Handler:         c.getHandler(),
-		Handshaker:      c.getHandshaker(),
-		MaxConns:        c.getMaxConns(),
-		ReadBufferSize:  c.getReadBufferSize(),
-		WriteBufferSize: c.getWriteBufferSize(),
-		ReadTimeout:     c.getReadTimeout(),
-		WriteTimeout:    c.getWriteTimeout(),
-	}
-	c.conns = append(c.conns, cc)
-	return cc
-}
-
 func (c *Client) getHandler() Handler {
 	if c.Handler == nil {
 		return DefaultHandler
@@ -156,6 +131,13 @@ func (c *Client) getMaxConns() int {
 		return DefaultMaxClientConns
 	}
 	return c.MaxConns
+}
+
+func (c *Client) getNumDialAttempts() int {
+	if c.NumDialAttempts <= 0 {
+		return DefaultNumDialAttempts
+	}
+	return c.NumDialAttempts
 }
 
 func (c *Client) getReadBufferSize() int {

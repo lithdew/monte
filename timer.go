@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+var zeroTime time.Time
+
 var timerPool sync.Pool
 
 func AcquireTimer(timeout time.Duration) *time.Timer {

@@ -1,19 +1,13 @@
 package monte
 
 import (
-	"errors"
+	"fmt"
+	"io"
 	"sync"
 	"time"
 )
 
 type Conn struct {
-	Addr string
-
-	Handler    Handler
-	Handshaker Handshaker
-
-	MaxConns int
-
 	ReadBufferSize  int
 	WriteBufferSize int
 
@@ -31,29 +25,27 @@ type Conn struct {
 	seq  uint32
 }
 
-func (c *Conn) NumPendingWrites() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return len(c.writerQueue)
-}
-
 func (c *Conn) Write(buf []byte) error {
 	c.once.Do(c.init)
-
 	pw, err := c.preparePendingWrite(buf, true)
 	if err != nil {
 		return err
 	}
 	defer releasePendingWrite(pw)
 	pw.wg.Wait()
-	return nil
+	return pw.err
 }
 
 func (c *Conn) WriteNoWait(buf []byte) error {
 	c.once.Do(c.init)
-
 	_, err := c.preparePendingWrite(buf, false)
 	return err
+}
+
+func (c *Conn) NumPendingWrites() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.writerQueue)
 }
 
 func (c *Conn) Handle(done chan struct{}, conn BufferedConn) error {
@@ -74,19 +66,29 @@ func (c *Conn) Handle(done chan struct{}, conn BufferedConn) error {
 	select {
 	case <-done:
 		c.closeWriter()
-		<-writerDone
+		err = <-writerDone
 		conn.Close()
-		<-readerDone
+		if err == nil {
+			err = <-readerDone
+		} else {
+			<-readerDone
+		}
 	case err = <-writerDone:
 		conn.Close()
-		<-readerDone
+		if err == nil {
+			err = <-readerDone
+		} else {
+			<-readerDone
+		}
 	case err = <-readerDone:
 		c.closeWriter()
-		<-writerDone
+		if err == nil {
+			err = <-writerDone
+		} else {
+			<-writerDone
+		}
 		conn.Close()
 	}
-
-	c.clearPendingWrites()
 
 	return err
 }
@@ -96,32 +98,30 @@ func (c *Conn) init() {
 	c.writerCond.L = &c.mu
 }
 
+func (c *Conn) preparePendingWrite(buf []byte, wait bool) (*pendingWrite, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.writerDone {
+		return nil, fmt.Errorf("node is shut down: %w", io.EOF)
+	}
+
+	pw := acquirePendingWrite(buf, wait)
+	if wait {
+		pw.wg.Add(1)
+	}
+
+	c.writerQueue = append(c.writerQueue, pw)
+	c.writerCond.Signal()
+
+	return pw, nil
+}
+
 func (c *Conn) closeWriter() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.writerDone = true
 	c.writerCond.Signal()
-}
-
-func (c *Conn) getHandler() Handler {
-	if c.Handler == nil {
-		return DefaultHandler
-	}
-	return c.Handler
-}
-
-func (c *Conn) getHandshaker() Handshaker {
-	if c.Handshaker == nil {
-		return DefaultClientHandshaker
-	}
-	return c.Handshaker
-}
-
-func (c *Conn) getMaxConns() int {
-	if c.MaxConns <= 0 {
-		return DefaultMaxClientConns
-	}
-	return c.MaxConns
 }
 
 func (c *Conn) getReadBufferSize() int {
@@ -150,26 +150,6 @@ func (c *Conn) getWriteTimeout() time.Duration {
 		return DefaultWriteTimeout
 	}
 	return c.WriteTimeout
-}
-
-func (c *Conn) preparePendingWrite(buf []byte, wait bool) (*pendingWrite, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.writerDone {
-		return nil, errors.New("node is shut down")
-	}
-
-	pw := acquirePendingWrite(buf, wait)
-
-	if wait {
-		pw.wg.Add(1)
-	}
-
-	c.writerQueue = append(c.writerQueue, pw)
-	c.writerCond.Signal()
-
-	return pw, nil
 }
 
 func (c *Conn) next() uint32 {
@@ -204,6 +184,7 @@ func (c *Conn) writeLoop(conn BufferedConn) error {
 				_, err = conn.Write(pw.buf)
 			}
 			if pw.wait {
+				pw.err = err
 				pw.wg.Done()
 			} else {
 				releasePendingWrite(pw)
@@ -244,22 +225,30 @@ func (c *Conn) readLoop(conn BufferedConn) error {
 	return err
 }
 
-func (c *Conn) clearPendingWrites() {
+func (c *Conn) close(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	for _, pw := range c.writerQueue {
 		if pw.wait {
+			pw.err = err
 			pw.wg.Done()
 		} else {
 			releasePendingWrite(pw)
 		}
 	}
+	c.writerQueue = nil
+	c.writerDone = false
+	for seq := range c.reqs {
+		delete(c.reqs, seq)
+	}
+	c.seq = 0
 }
 
 type pendingWrite struct {
 	buf  []byte
 	wait bool
+	err  error
 	wg   sync.WaitGroup
 }
 

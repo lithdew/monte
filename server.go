@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-var zeroTime time.Time
-
 var DefaultMaxServerConns = 1024
 
 var DefaultHandshakeTimeout = 3 * time.Second
