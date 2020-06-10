@@ -2,15 +2,23 @@ package monte
 
 import "net"
 
+type Handler interface {
+	HandleMessage(ctx *Context) error
+}
+
+type HandlerFunc func(ctx *Context) error
+
+func (fn HandlerFunc) HandleMessage(ctx *Context) error { return fn(ctx) }
+
+var DefaultHandler HandlerFunc = func(ctx *Context) error { return nil }
+
 type Handshaker interface {
 	Handshake(conn net.Conn) (BufferedConn, error)
 }
 
 type HandshakerFunc func(conn net.Conn) (BufferedConn, error)
 
-func (h HandshakerFunc) Handshake(conn net.Conn) (BufferedConn, error) {
-	return h(conn)
-}
+func (fn HandshakerFunc) Handshake(conn net.Conn) (BufferedConn, error) { return fn(conn) }
 
 var DefaultClientHandshaker HandshakerFunc = func(conn net.Conn) (BufferedConn, error) {
 	session, err := NewSession()

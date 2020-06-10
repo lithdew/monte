@@ -14,6 +14,8 @@ var DefaultHandshakeTimeout = 3 * time.Second
 var DefaultMaxConnWaitTimeout = 3 * time.Second
 
 type Server struct {
+	Handler Handler
+
 	Handshaker       Handshaker
 	HandshakeTimeout time.Duration
 
@@ -37,6 +39,13 @@ type Server struct {
 func (s *Server) init() {
 	s.sem = make(chan struct{}, s.getMaxConns())
 	s.done = make(chan struct{})
+}
+
+func (s *Server) getHandler() Handler {
+	if s.Handler == nil {
+		return DefaultHandler
+	}
+	return s.Handler
 }
 
 func (s *Server) getHandshaker() Handshaker {
@@ -68,14 +77,14 @@ func (s *Server) getMaxConnWaitTimeout() time.Duration {
 }
 
 func (s *Server) getReadTimeout() time.Duration {
-	if s.ReadTimeout <= 0 {
+	if s.ReadTimeout < 0 {
 		return DefaultReadTimeout
 	}
 	return s.ReadTimeout
 }
 
 func (s *Server) getWriteTimeout() time.Duration {
-	if s.WriteTimeout <= 0 {
+	if s.WriteTimeout < 0 {
 		return DefaultWriteTimeout
 	}
 	return s.WriteTimeout
@@ -153,6 +162,7 @@ func (s *Server) client(conn net.Conn) error {
 	}
 
 	cc := &Conn{
+		Handler:         s.getHandler(),
 		ReadBufferSize:  s.getReadBufferSize(),
 		WriteBufferSize: s.getWriteBufferSize(),
 		ReadTimeout:     s.getReadTimeout(),

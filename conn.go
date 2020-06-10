@@ -10,6 +10,8 @@ import (
 )
 
 type Conn struct {
+	Handler Handler
+
 	ReadBufferSize  int
 	WriteBufferSize int
 
@@ -98,33 +100,14 @@ func (c *Conn) Handle(done chan struct{}, conn BufferedConn) error {
 	return err
 }
 
-func (c *Conn) init() {
-	c.reqs = make(map[uint32]*pendingRequest)
-	c.writerCond.L = &c.mu
-}
-
-func (c *Conn) Send(payload []byte) error {
-	buf := bytebufferpool.Get()
-	defer bytebufferpool.Put(buf)
-
-	buf.B = bytesutil.AppendUint32BE(buf.B, 0)
-	buf.B = append(buf.B, payload...)
-
-	return c.write(buf.B)
-}
-
-func (c *Conn) SendNoWait(payload []byte) error {
-	buf := bytebufferpool.Get()
-	defer bytebufferpool.Put(buf)
-
-	buf.B = bytesutil.AppendUint32BE(buf.B, 0)
-	buf.B = append(buf.B, payload...)
-
-	return c.writeNoWait(buf.B)
-}
+func (c *Conn) Send(payload []byte) error       { c.once.Do(c.init); return c.send(0, payload) }
+func (c *Conn) SendNoWait(payload []byte) error { c.once.Do(c.init); return c.sendNoWait(0, payload) }
 
 func (c *Conn) Request(dst []byte, payload []byte) ([]byte, error) {
+	c.once.Do(c.init)
+
 	buf := bytebufferpool.Get()
+	defer bytebufferpool.Put(buf)
 
 	seq := c.next()
 
@@ -140,9 +123,7 @@ func (c *Conn) Request(dst []byte, payload []byte) ([]byte, error) {
 	c.reqs[seq] = pr
 	c.mu.Unlock()
 
-	err := c.write(buf.B)
-
-	bytebufferpool.Put(buf)
+	err := c.writeNoWait(buf.B)
 
 	if err != nil {
 		pr.wg.Done()
@@ -155,7 +136,32 @@ func (c *Conn) Request(dst []byte, payload []byte) ([]byte, error) {
 
 	pr.wg.Wait()
 
-	return dst, nil
+	return pr.dst, nil
+}
+
+func (c *Conn) init() {
+	c.reqs = make(map[uint32]*pendingRequest)
+	c.writerCond.L = &c.mu
+}
+
+func (c *Conn) send(seq uint32, payload []byte) error {
+	buf := bytebufferpool.Get()
+	defer bytebufferpool.Put(buf)
+
+	buf.B = bytesutil.AppendUint32BE(buf.B, seq)
+	buf.B = append(buf.B, payload...)
+
+	return c.write(buf.B)
+}
+
+func (c *Conn) sendNoWait(seq uint32, payload []byte) error {
+	buf := bytebufferpool.Get()
+	defer bytebufferpool.Put(buf)
+
+	buf.B = bytesutil.AppendUint32BE(buf.B, seq)
+	buf.B = append(buf.B, payload...)
+
+	return c.writeNoWait(buf.B)
 }
 
 func (c *Conn) preparePendingWrite(buf []byte, wait bool) (*pendingWrite, error) {
@@ -184,6 +190,13 @@ func (c *Conn) closeWriter() {
 	c.writerCond.Signal()
 }
 
+func (c *Conn) getHandler() Handler {
+	if c.Handler == nil {
+		return DefaultHandler
+	}
+	return c.Handler
+}
+
 func (c *Conn) getReadBufferSize() int {
 	if c.ReadBufferSize <= 0 {
 		return DefaultReadBufferSize
@@ -199,14 +212,14 @@ func (c *Conn) getWriteBufferSize() int {
 }
 
 func (c *Conn) getReadTimeout() time.Duration {
-	if c.ReadTimeout <= 0 {
+	if c.ReadTimeout < 0 {
 		return DefaultReadTimeout
 	}
 	return c.ReadTimeout
 }
 
 func (c *Conn) getWriteTimeout() time.Duration {
-	if c.WriteTimeout <= 0 {
+	if c.WriteTimeout < 0 {
 		return DefaultWriteTimeout
 	}
 	return c.WriteTimeout
@@ -239,6 +252,22 @@ func (c *Conn) writeLoop(conn BufferedConn) error {
 			break
 		}
 
+		timeout := c.getWriteTimeout()
+		if timeout > 0 {
+			err = conn.SetWriteDeadline(time.Now().Add(timeout))
+			if err != nil {
+				for _, pw := range queue {
+					if pw.wait {
+						pw.err = err
+						pw.wg.Done()
+					} else {
+						releasePendingWrite(pw)
+					}
+				}
+				break
+			}
+		}
+
 		for _, pw := range queue {
 			if err == nil {
 				_, err = conn.Write(pw.buf)
@@ -265,21 +294,25 @@ func (c *Conn) writeLoop(conn BufferedConn) error {
 }
 
 func (c *Conn) readLoop(conn BufferedConn) error {
-	var (
-		buf = make([]byte, c.getReadBufferSize())
-		n   int
-		err error
-	)
+	buf := make([]byte, c.getReadBufferSize())
 
 	for {
-		n, err = conn.Read(buf)
+		timeout := c.getReadTimeout()
+		if timeout > 0 {
+			err := conn.SetReadDeadline(time.Now().Add(timeout))
+			if err != nil {
+				return err
+			}
+		}
+
+		n, err := conn.Read(buf)
 		if err != nil {
-			break
+			return err
 		}
 
 		data := buf[:n]
 		if len(data) < 4 {
-			return fmt.Errorf("no seq num attached to msg: %w", err)
+			return fmt.Errorf("no sequence number to decode: %w", io.ErrUnexpectedEOF)
 		}
 
 		seq := bytesutil.Uint32BE(data)
@@ -293,6 +326,10 @@ func (c *Conn) readLoop(conn BufferedConn) error {
 		c.mu.Unlock()
 
 		if seq == 0 || !exists {
+			err := c.call(seq, data)
+			if err != nil {
+				return fmt.Errorf("handler encountered an error: %w", err)
+			}
 			continue
 		}
 
@@ -303,8 +340,12 @@ func (c *Conn) readLoop(conn BufferedConn) error {
 
 		pr.wg.Done()
 	}
+}
 
-	return err
+func (c *Conn) call(seq uint32, data []byte) error {
+	ctx := acquireContext(c, seq, data)
+	defer releaseContext(ctx)
+	return c.getHandler().HandleMessage(ctx)
 }
 
 func (c *Conn) close(err error) {
@@ -331,49 +372,4 @@ func (c *Conn) close(err error) {
 	}
 
 	c.seq = 0
-}
-
-type pendingRequest struct {
-	dst []byte         // dst to copy response to
-	wg  sync.WaitGroup // signals the caller that the response has been received
-}
-
-var pendingRequestPool sync.Pool
-
-func acquirePendingRequest(dst []byte) *pendingRequest {
-	v := pendingRequestPool.Get()
-	if v == nil {
-		v = &pendingRequest{}
-	}
-	pr := v.(*pendingRequest)
-	pr.dst = dst
-	return pr
-}
-
-func releasePendingRequest(pr *pendingRequest) {
-	pendingRequestPool.Put(pr)
-}
-
-type pendingWrite struct {
-	buf  []byte         // payload
-	wait bool           // signal to caller if they're waiting
-	err  error          // keeps track of any socket errors on write
-	wg   sync.WaitGroup // signals the caller that this write is complete
-}
-
-var pendingWritePool sync.Pool
-
-func acquirePendingWrite(buf []byte, wait bool) *pendingWrite {
-	v := pendingWritePool.Get()
-	if v == nil {
-		v = &pendingWrite{}
-	}
-	pw := v.(*pendingWrite)
-	pw.buf = buf
-	pw.wait = wait
-	return pw
-}
-
-func releasePendingWrite(pw *pendingWrite) {
-	pendingWritePool.Put(pw)
 }

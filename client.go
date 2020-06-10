@@ -23,6 +23,8 @@ type clientConn struct {
 type Client struct {
 	Addr string
 
+	Handler Handler
+
 	Handshaker       Handshaker
 	HandshakeTimeout time.Duration
 
@@ -60,6 +62,7 @@ func (c *Client) Send(buf []byte) error {
 
 func (c *Client) SendNoWait(buf []byte) error {
 	c.once.Do(c.init)
+
 	cc := c.getClientConn()
 
 	<-cc.ready
@@ -114,6 +117,7 @@ func (c *Client) newClientConn() *clientConn {
 	cc := &clientConn{
 		ready: make(chan struct{}),
 		conn: &Conn{
+			Handler:         c.getHandler(),
 			ReadBufferSize:  c.getReadBufferSize(),
 			WriteBufferSize: c.getWriteBufferSize(),
 			ReadTimeout:     c.getReadTimeout(),
@@ -193,6 +197,13 @@ func (c *Client) getClientConn() *clientConn {
 	return mc
 }
 
+func (c *Client) getHandler() Handler {
+	if c.Handler == nil {
+		return DefaultHandler
+	}
+	return c.Handler
+}
+
 func (c *Client) getHandshaker() Handshaker {
 	if c.Handshaker == nil {
 		return DefaultClientHandshaker
@@ -243,14 +254,14 @@ func (c *Client) getDialTimeout() time.Duration {
 }
 
 func (c *Client) getReadTimeout() time.Duration {
-	if c.ReadTimeout <= 0 {
+	if c.ReadTimeout < 0 {
 		return DefaultReadTimeout
 	}
 	return c.ReadTimeout
 }
 
 func (c *Client) getWriteTimeout() time.Duration {
-	if c.WriteTimeout <= 0 {
+	if c.WriteTimeout < 0 {
 		return DefaultWriteTimeout
 	}
 	return c.WriteTimeout
