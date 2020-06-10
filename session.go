@@ -45,7 +45,7 @@ func NewSessionConn(suite cipher.AEAD, conn net.Conn) *SessionConn {
 
 func (s *SessionConn) Read(b []byte) (int, error) {
 	var err error
-	b, err = Read(b[:0], s.br, cap(b))
+	b, err = ReadSized(b[:0], s.br, cap(b))
 	if err != nil {
 		return 0, err
 	}
@@ -82,7 +82,7 @@ func (s *SessionConn) Write(b []byte) (int, error) {
 		nil,
 	)
 
-	err := Write(s.bw, s.wb)
+	err := WriteSized(s.bw, s.wb)
 	if err != nil {
 		return 0, err
 	}
@@ -168,7 +168,7 @@ func (s *Session) Write(conn net.Conn) error {
 }
 
 func (s *Session) Read(conn net.Conn) error {
-	publicKey, err := Read(nil, conn, x25519.PointSize)
+	publicKey, err := Read(make([]byte, x25519.PointSize), conn)
 	if err != nil {
 		return fmt.Errorf("failed to read peer session public key: %w", err)
 	}

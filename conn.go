@@ -60,12 +60,11 @@ func (c *Conn) Handle(done chan struct{}, conn BufferedConn) error {
 	c.once.Do(c.init)
 
 	writerDone := make(chan error)
-	readerDone := make(chan error)
-
 	go func() {
 		writerDone <- c.writeLoop(conn)
 	}()
 
+	readerDone := make(chan error)
 	go func() {
 		readerDone <- c.readLoop(conn)
 	}()
@@ -74,11 +73,7 @@ func (c *Conn) Handle(done chan struct{}, conn BufferedConn) error {
 
 	select {
 	case <-done:
-		c.mu.Lock()
-		c.writerDone = true
-		c.writerCond.Signal()
-		c.mu.Unlock()
-
+		c.closeWriter()
 		<-writerDone
 		conn.Close()
 		<-readerDone
@@ -86,11 +81,7 @@ func (c *Conn) Handle(done chan struct{}, conn BufferedConn) error {
 		conn.Close()
 		<-readerDone
 	case err = <-readerDone:
-		c.mu.Lock()
-		c.writerDone = true
-		c.writerCond.Signal()
-		c.mu.Unlock()
-
+		c.closeWriter()
 		<-writerDone
 		conn.Close()
 	}
@@ -103,6 +94,13 @@ func (c *Conn) Handle(done chan struct{}, conn BufferedConn) error {
 func (c *Conn) init() {
 	c.reqs = make(map[uint32]*pendingRequest)
 	c.writerCond.L = &c.mu
+}
+
+func (c *Conn) closeWriter() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.writerDone = true
+	c.writerCond.Signal()
 }
 
 func (c *Conn) getHandler() Handler {
