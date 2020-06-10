@@ -56,7 +56,7 @@ func (c *Conn) WriteNoWait(buf []byte) error {
 	return err
 }
 
-func (c *Conn) Handle(conn BufferedConn, done chan struct{}) error {
+func (c *Conn) Handle(done chan struct{}, conn BufferedConn) error {
 	c.once.Do(c.init)
 
 	writerDone := make(chan error)

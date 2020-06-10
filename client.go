@@ -1,6 +1,7 @@
 package monte
 
 import (
+	"net"
 	"sync"
 	"time"
 )
@@ -24,8 +25,9 @@ type Client struct {
 	ReadBufferSize  int
 	WriteBufferSize int
 
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
+	HandshakeTimeout time.Duration
+	ReadTimeout      time.Duration
+	WriteTimeout     time.Duration
 
 	once     sync.Once
 	shutdown sync.Once
@@ -39,7 +41,37 @@ type Client struct {
 func (c *Client) Write(buf []byte) error {
 	c.once.Do(c.init)
 
-	return c.getConn().Write(buf)
+	cc := c.getConn()
+
+	go func() error { // TODO(kenta): cleanup, dial on first Write()/WriteNoWait()
+		conn, err := net.Dial("tcp", c.Addr)
+		if err != nil {
+			return err
+		}
+
+		timeout := c.getHandshakeTimeout()
+
+		if timeout != 0 {
+			err := conn.SetDeadline(time.Now().Add(timeout))
+			if err != nil {
+				return err
+			}
+		}
+
+		bufConn, err := c.getHandshaker().Handshake(conn)
+		if err != nil {
+			return err
+		}
+
+		err = cc.Handle(c.done, bufConn)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}()
+
+	return cc.Write(buf)
 }
 
 func (c *Client) WriteNoWait(buf []byte) error {
@@ -101,14 +133,6 @@ func (c *Client) newConn() *Conn {
 		ReadTimeout:     c.getReadTimeout(),
 		WriteTimeout:    c.getWriteTimeout(),
 	}
-
-	go func() {
-		// TODO(kenta): dial logic
-
-		err := cc.Handle(nil, c.done)
-		_ = err
-	}()
-
 	c.conns = append(c.conns, cc)
 	return cc
 }
@@ -146,6 +170,13 @@ func (c *Client) getWriteBufferSize() int {
 		return DefaultWriteBufferSize
 	}
 	return c.WriteBufferSize
+}
+
+func (c *Client) getHandshakeTimeout() time.Duration {
+	if c.HandshakeTimeout <= 0 {
+		return DefaultHandshakeTimeout
+	}
+	return c.HandshakeTimeout
 }
 
 func (c *Client) getReadTimeout() time.Duration {

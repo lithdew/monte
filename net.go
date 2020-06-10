@@ -3,16 +3,16 @@ package monte
 import "net"
 
 type Handler interface {
-	Handle(conn BufferedConn, done chan struct{}) error
+	Handle(done chan struct{}, conn BufferedConn) error
 }
 
-type HandlerFunc func(conn BufferedConn, done chan struct{}) error
+type HandlerFunc func(done chan struct{}, conn BufferedConn) error
 
-func (h HandlerFunc) Handle(conn BufferedConn, done chan struct{}) error {
-	return h(conn, done)
+func (h HandlerFunc) Handle(done chan struct{}, conn BufferedConn) error {
+	return h(done, conn)
 }
 
-var DefaultHandler HandlerFunc = func(conn BufferedConn, _ chan struct{}) error { return nil }
+var DefaultHandler HandlerFunc = func(_ chan struct{}, conn BufferedConn) error { return nil }
 
 type Handshaker interface {
 	Handshake(conn net.Conn) (BufferedConn, error)
