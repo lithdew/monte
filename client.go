@@ -27,38 +27,54 @@ type Client struct {
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
 
-	mu  sync.Mutex
-	ccs []*clientConn
+	once     sync.Once
+	shutdown sync.Once
+
+	done chan struct{}
+
+	mu    sync.Mutex
+	conns []*Conn
 }
 
-type clientConn struct {
-	Addr string
+func (c *Client) Write(buf []byte) error {
+	c.once.Do(c.init)
 
-	Handler    Handler
-	Handshaker Handshaker
-
-	MaxConns int
-
-	ReadBufferSize  int
-	WriteBufferSize int
-
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
+	return c.getConn().Write(buf)
 }
 
-func (c *Client) getClientConn() *clientConn {
-	if len(c.ccs) == 0 {
-		return c.createClientConn()
+func (c *Client) WriteNoWait(buf []byte) error {
+	c.once.Do(c.init)
+
+	return c.getConn().WriteNoWait(buf)
+}
+
+func (c *Client) Shutdown() {
+	c.once.Do(c.init)
+
+	shutdown := func() {
+		close(c.done)
 	}
-	//cc := c.ccs[0]
-	//for i := 1; i < len(c.ccs); i++ {
-	//
-	//}
-	return c.createClientConn()
+	c.shutdown.Do(shutdown)
 }
 
-func (c *Client) createClientConn() *clientConn {
-	cc := &clientConn{
+func (c *Client) init() {
+	c.done = make(chan struct{})
+}
+
+func (c *Client) getConn() *Conn {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// TODO(kenta): multiple conns
+
+	if len(c.conns) == 0 {
+		return c.createConn()
+	}
+	return c.conns[0]
+}
+
+func (c *Client) createConn() *Conn {
+	cc := &Conn{
 		Addr:            c.Addr,
 		Handler:         c.getHandler(),
 		Handshaker:      c.getHandshaker(),
@@ -68,7 +84,15 @@ func (c *Client) createClientConn() *clientConn {
 		ReadTimeout:     c.getReadTimeout(),
 		WriteTimeout:    c.getWriteTimeout(),
 	}
-	c.ccs = append(c.ccs, cc)
+
+	go func() {
+		// TODO(kenta): dial logic
+
+		err := cc.Handle(nil, c.done)
+		_ = err
+	}()
+
+	c.conns = append(c.conns, cc)
 	return cc
 }
 

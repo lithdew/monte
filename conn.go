@@ -3,37 +3,91 @@ package monte
 import (
 	"errors"
 	"sync"
+	"time"
 )
 
 type Conn struct {
-	mu sync.Mutex
+	Addr string
+
+	Handler    Handler
+	Handshaker Handshaker
+
+	MaxConns int
+
+	ReadBufferSize  int
+	WriteBufferSize int
+
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+
+	mu   sync.Mutex
+	once sync.Once
 
 	writerQueue []*pendingWrite
 	writerCond  sync.Cond
 	writerDone  bool
 
-	seq uint32
-	req map[uint32]*pendingRequest
+	reqs map[uint32]*pendingRequest
+	seq  uint32
 }
 
-func NewConn() *Conn {
-	c := &Conn{req: make(map[uint32]*pendingRequest)}
+func (c *Conn) init() {
+	c.reqs = make(map[uint32]*pendingRequest)
 	c.writerCond.L = &c.mu
-	return c
 }
 
-func (c *Conn) next() uint32 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.seq++
-	if c.seq == 0 {
-		c.seq = 1
+func (c *Conn) getHandler() Handler {
+	if c.Handler == nil {
+		return DefaultHandler
 	}
-	return c.seq
+	return c.Handler
+}
+
+func (c *Conn) getHandshaker() Handshaker {
+	if c.Handshaker == nil {
+		return DefaultClientHandshaker
+	}
+	return c.Handshaker
+}
+
+func (c *Conn) getMaxConns() int {
+	if c.MaxConns <= 0 {
+		return DefaultMaxClientConns
+	}
+	return c.MaxConns
+}
+
+func (c *Conn) getReadBufferSize() int {
+	if c.ReadBufferSize <= 0 {
+		return DefaultReadBufferSize
+	}
+	return c.ReadBufferSize
+}
+
+func (c *Conn) getWriteBufferSize() int {
+	if c.WriteBufferSize <= 0 {
+		return DefaultWriteBufferSize
+	}
+	return c.WriteBufferSize
+}
+
+func (c *Conn) getReadTimeout() time.Duration {
+	if c.ReadTimeout <= 0 {
+		return DefaultReadTimeout
+	}
+	return c.ReadTimeout
+}
+
+func (c *Conn) getWriteTimeout() time.Duration {
+	if c.WriteTimeout <= 0 {
+		return DefaultWriteTimeout
+	}
+	return c.WriteTimeout
 }
 
 func (c *Conn) Write(buf []byte) error {
+	c.once.Do(c.init)
+
 	pw, err := c.preparePendingWrite(buf, true)
 	if err != nil {
 		return err
@@ -44,6 +98,8 @@ func (c *Conn) Write(buf []byte) error {
 }
 
 func (c *Conn) WriteNoWait(buf []byte) error {
+	c.once.Do(c.init)
+
 	_, err := c.preparePendingWrite(buf, false)
 	return err
 }
@@ -68,7 +124,20 @@ func (c *Conn) preparePendingWrite(buf []byte, wait bool) (*pendingWrite, error)
 	return pw, nil
 }
 
+func (c *Conn) next() uint32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.seq++
+	if c.seq == 0 {
+		c.seq = 1
+	}
+	return c.seq
+}
+
 func (c *Conn) Handle(conn BufferedConn, done chan struct{}) error {
+	c.once.Do(c.init)
+
 	writerDone := make(chan error)
 	readerDone := make(chan error)
 
@@ -152,7 +221,7 @@ func (c *Conn) writeLoop(conn BufferedConn) error {
 
 func (c *Conn) readLoop(conn BufferedConn) error {
 	var (
-		buf = make([]byte, 4096)
+		buf = make([]byte, c.getReadBufferSize())
 		n   int
 		err error
 	)
