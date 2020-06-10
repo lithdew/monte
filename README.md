@@ -6,6 +6,16 @@
 
 The bare minimum for high performance, fully-encrypted RPC over TCP in Go.
 
+## Features
+
+1. Send requests, receive responses, or send messages with no expectations for responses.
+2. Send from 50MiB/s to 1500MiB/s, with zero to two allocations max per sent message or RPC call.
+3. Gracefully establish multiple client connections to a single endpoint up to a configurable limit.
+4. Set the total number of connections that may concurrently be accepted and handled by a single endpoint.
+5. Configure read/write timeouts, dial timeouts, handshake timeouts, or customize the handshaking protocol.
+6. All messages, once the handshake protocol is complete, are encrypted and non-distinguishable from each other.
+7. Supports graceful shutdowns for both client and server, with extensive tests for highly-concurrent scenarios.
+
 ## Protocol
 
 ### Handshake
