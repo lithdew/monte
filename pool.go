@@ -1,6 +1,7 @@
 package monte
 
 import (
+	"github.com/valyala/bytebufferpool"
 	"sync"
 	"time"
 )
@@ -50,15 +51,15 @@ func acquirePendingRequest(dst []byte) *pendingRequest {
 func releasePendingRequest(pr *pendingRequest) { pendingRequestPool.Put(pr) }
 
 type pendingWrite struct {
-	buf  []byte         // payload
-	wait bool           // signal to caller if they're waiting
-	err  error          // keeps track of any socket errors on write
-	wg   sync.WaitGroup // signals the caller that this write is complete
+	buf  *bytebufferpool.ByteBuffer // payload
+	wait bool                       // signal to caller if they're waiting
+	err  error                      // keeps track of any socket errors on write
+	wg   sync.WaitGroup             // signals the caller that this write is complete
 }
 
 var pendingWritePool sync.Pool
 
-func acquirePendingWrite(buf []byte, wait bool) *pendingWrite {
+func acquirePendingWrite(buf *bytebufferpool.ByteBuffer, wait bool) *pendingWrite {
 	v := pendingWritePool.Get()
 	if v == nil {
 		v = &pendingWrite{}

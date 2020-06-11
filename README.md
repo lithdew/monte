@@ -8,8 +8,8 @@ The bare minimum for high performance, fully-encrypted RPC over TCP in Go.
 
 ## Features
 
-1. Send requests, receive responses, or send messages with no expectations for responses.
-2. Send from 50MiB/s to 1500MiB/s, with zero to two allocations max per sent message or RPC call.
+1. Send requests, receive responses, or send messages without waiting for a response.
+2. Send from 50MiB/s to 1500MiB/s, with zero allocations per sent message or RPC call.
 3. Gracefully establish multiple client connections to a single endpoint up to a configurable limit.
 4. Set the total number of connections that may concurrently be accepted and handled by a single endpoint.
 5. Configure read/write timeouts, dial timeouts, handshake timeouts, or customize the handshaking protocol.
@@ -44,10 +44,10 @@ $ go test -bench=. -benchtime=10s
 goos: linux
 goarch: amd64
 pkg: github.com/lithdew/monte
-BenchmarkSend-8                          1643733              7082 ns/op         197.70 MB/s         123 B/op          1 allocs/op
-BenchmarkSendNoWait-8                   14516896               913 ns/op        1533.80 MB/s         152 B/op          0 allocs/op
-BenchmarkRequest-8                        424249             28276 ns/op          49.51 MB/s         156 B/op          2 allocs/op
-BenchmarkParallelSend-8                  5316900              2450 ns/op         571.40 MB/s         124 B/op          1 allocs/op
-BenchmarkParallelSendNoWait-8           11475540              1072 ns/op        1305.66 MB/s         154 B/op          0 allocs/op
-BenchmarkParallelRequest-8               1384652              7824 ns/op         178.93 MB/s         156 B/op          2 allocs/op
+BenchmarkSend-8                          1814391              6690 ns/op         209.27 MB/s         115 B/op          0 allocs/op
+BenchmarkSendNoWait-8                   10638730              1153 ns/op        1214.19 MB/s         141 B/op          0 allocs/op
+BenchmarkRequest-8                        438381             28556 ns/op          49.03 MB/s         140 B/op          0 allocs/op
+BenchmarkParallelSend-8                  4917001              2876 ns/op         486.70 MB/s         115 B/op          0 allocs/op
+BenchmarkParallelSendNoWait-8           10317255              1291 ns/op        1084.78 MB/s         150 B/op          0 allocs/op
+BenchmarkParallelRequest-8               1341444              8520 ns/op         164.32 MB/s         140 B/op          0 allocs/op
 ```

@@ -1,6 +1,7 @@
 package monte
 
 import (
+	"encoding/binary"
 	"fmt"
 	"github.com/lithdew/bytesutil"
 	"github.com/valyala/bytebufferpool"
@@ -27,23 +28,6 @@ type Conn struct {
 
 	reqs map[uint32]*pendingRequest
 	seq  uint32
-}
-
-func (c *Conn) write(buf []byte) error {
-	c.once.Do(c.init)
-	pw, err := c.preparePendingWrite(buf, true)
-	if err != nil {
-		return err
-	}
-	defer releasePendingWrite(pw)
-	pw.wg.Wait()
-	return pw.err
-}
-
-func (c *Conn) writeNoWait(buf []byte) error {
-	c.once.Do(c.init)
-	_, err := c.preparePendingWrite(buf, false)
-	return err
 }
 
 func (c *Conn) NumPendingWrites() int {
@@ -106,24 +90,18 @@ func (c *Conn) SendNoWait(payload []byte) error { c.once.Do(c.init); return c.se
 func (c *Conn) Request(dst []byte, payload []byte) ([]byte, error) {
 	c.once.Do(c.init)
 
-	buf := bytebufferpool.Get()
-	defer bytebufferpool.Put(buf)
-
-	seq := c.next()
-
-	buf.B = bytesutil.AppendUint32BE(buf.B, seq)
-	buf.B = append(buf.B, payload...)
-
 	pr := acquirePendingRequest(dst)
 	defer releasePendingRequest(pr)
 
 	pr.wg.Add(1)
 
+	seq := c.next()
+
 	c.mu.Lock()
 	c.reqs[seq] = pr
 	c.mu.Unlock()
 
-	err := c.writeNoWait(buf.B)
+	err := c.sendNoWait(seq, payload)
 
 	if err != nil {
 		pr.wg.Done()
@@ -148,23 +126,37 @@ func (c *Conn) send(seq uint32, payload []byte) error {
 	buf := bytebufferpool.Get()
 	defer bytebufferpool.Put(buf)
 
-	buf.B = bytesutil.AppendUint32BE(buf.B, seq)
-	buf.B = append(buf.B, payload...)
+	buf.B = bytesutil.ExtendSlice(buf.B, 4+len(payload))
+	binary.BigEndian.PutUint32(buf.B[:4], seq)
+	copy(buf.B[4:], payload)
 
-	return c.write(buf.B)
+	return c.write(buf)
 }
 
 func (c *Conn) sendNoWait(seq uint32, payload []byte) error {
 	buf := bytebufferpool.Get()
-	defer bytebufferpool.Put(buf)
-
-	buf.B = bytesutil.AppendUint32BE(buf.B, seq)
-	buf.B = append(buf.B, payload...)
-
-	return c.writeNoWait(buf.B)
+	buf.B = bytesutil.ExtendSlice(buf.B, 4+len(payload))
+	binary.BigEndian.PutUint32(buf.B[:4], seq)
+	copy(buf.B[4:], payload)
+	return c.writeNoWait(buf)
 }
 
-func (c *Conn) preparePendingWrite(buf []byte, wait bool) (*pendingWrite, error) {
+func (c *Conn) write(buf *bytebufferpool.ByteBuffer) error {
+	pw, err := c.preparePendingWrite(buf, true)
+	if err != nil {
+		return err
+	}
+	defer releasePendingWrite(pw)
+	pw.wg.Wait()
+	return pw.err
+}
+
+func (c *Conn) writeNoWait(buf *bytebufferpool.ByteBuffer) error {
+	_, err := c.preparePendingWrite(buf, false)
+	return err
+}
+
+func (c *Conn) preparePendingWrite(buf *bytebufferpool.ByteBuffer, wait bool) (*pendingWrite, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -237,6 +229,7 @@ func (c *Conn) next() uint32 {
 }
 
 func (c *Conn) writeLoop(conn BufferedConn) error {
+	var queue []*pendingWrite
 	var err error
 
 	for {
@@ -244,8 +237,16 @@ func (c *Conn) writeLoop(conn BufferedConn) error {
 		for !c.writerDone && len(c.writerQueue) == 0 {
 			c.writerCond.Wait()
 		}
-		done, queue := c.writerDone, c.writerQueue
-		c.writerQueue = nil
+		done := c.writerDone
+
+		if n := len(c.writerQueue) - cap(queue); n > 0 {
+			queue = append(queue[:cap(queue)], make([]*pendingWrite, n)...)
+		}
+		queue = queue[:len(c.writerQueue)]
+
+		copy(queue, c.writerQueue)
+
+		c.writerQueue = c.writerQueue[:0]
 		c.mu.Unlock()
 
 		if done && len(queue) == 0 {
@@ -261,6 +262,7 @@ func (c *Conn) writeLoop(conn BufferedConn) error {
 						pw.err = err
 						pw.wg.Done()
 					} else {
+						bytebufferpool.Put(pw.buf)
 						releasePendingWrite(pw)
 					}
 				}
@@ -270,12 +272,13 @@ func (c *Conn) writeLoop(conn BufferedConn) error {
 
 		for _, pw := range queue {
 			if err == nil {
-				_, err = conn.Write(pw.buf)
+				_, err = conn.Write(pw.buf.B)
 			}
 			if pw.wait {
 				pw.err = err
 				pw.wg.Done()
 			} else {
+				bytebufferpool.Put(pw.buf)
 				releasePendingWrite(pw)
 			}
 		}
@@ -357,6 +360,7 @@ func (c *Conn) close(err error) {
 			pw.err = err
 			pw.wg.Done()
 		} else {
+			bytebufferpool.Put(pw.buf)
 			releasePendingWrite(pw)
 		}
 	}
