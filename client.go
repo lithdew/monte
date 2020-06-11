@@ -174,11 +174,11 @@ func (c *Client) newClientConn() *clientConn {
 
 		close(cc.ready)
 
-		c.getConnStateHandler().HandleConnState(bufConn, StateNew)
+		c.getConnStateHandler().HandleConnState(cc.conn, StateNew)
 
 		cc.conn.close(cc.conn.Handle(c.done, bufConn))
 
-		c.getConnStateHandler().HandleConnState(bufConn, StateClosed)
+		c.getConnStateHandler().HandleConnState(cc.conn, StateClosed)
 	}()
 
 	return cc

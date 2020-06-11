@@ -177,11 +177,11 @@ func (s *Server) client(conn net.Conn) error {
 		WriteTimeout:    s.getWriteTimeout(),
 	}
 
-	s.getConnStateHandler().HandleConnState(bufConn, StateNew)
+	s.getConnStateHandler().HandleConnState(cc, StateNew)
 
 	cc.close(cc.Handle(s.done, bufConn))
 
-	s.getConnStateHandler().HandleConnState(bufConn, StateClosed)
+	s.getConnStateHandler().HandleConnState(cc, StateClosed)
 
 	return nil
 }

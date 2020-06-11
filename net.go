@@ -10,14 +10,14 @@ const (
 )
 
 type ConnStateHandler interface {
-	HandleConnState(conn BufferedConn, state ConnState)
+	HandleConnState(conn *Conn, state ConnState)
 }
 
-type ConnStateHandlerFunc func(conn BufferedConn, state ConnState)
+type ConnStateHandlerFunc func(conn *Conn, state ConnState)
 
-func (fn ConnStateHandlerFunc) HandleConnState(conn BufferedConn, state ConnState) { fn(conn, state) }
+func (fn ConnStateHandlerFunc) HandleConnState(conn *Conn, state ConnState) { fn(conn, state) }
 
-var DefaultConnStateHandler ConnStateHandlerFunc = func(conn BufferedConn, state ConnState) {}
+var DefaultConnStateHandler ConnStateHandlerFunc = func(conn *Conn, state ConnState) {}
 
 type Handler interface {
 	HandleMessage(ctx *Context) error
