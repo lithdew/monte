@@ -23,7 +23,8 @@ type clientConn struct {
 type Client struct {
 	Addr string
 
-	Handler Handler
+	Handler   Handler
+	ConnState ConnStateHandler
 
 	Handshaker       Handshaker
 	HandshakeTimeout time.Duration
@@ -173,7 +174,11 @@ func (c *Client) newClientConn() *clientConn {
 
 		close(cc.ready)
 
+		c.getConnStateHandler().HandleConnState(bufConn, StateNew)
+
 		cc.conn.close(cc.conn.Handle(c.done, bufConn))
+
+		c.getConnStateHandler().HandleConnState(bufConn, StateClosed)
 	}()
 
 	return cc
@@ -213,6 +218,13 @@ func (c *Client) getHandler() Handler {
 		return DefaultHandler
 	}
 	return c.Handler
+}
+
+func (c *Client) getConnStateHandler() ConnStateHandler {
+	if c.ConnState == nil {
+		return DefaultConnStateHandler
+	}
+	return c.ConnState
 }
 
 func (c *Client) getHandshaker() Handshaker {

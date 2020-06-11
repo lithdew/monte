@@ -2,6 +2,23 @@ package monte
 
 import "net"
 
+type ConnState int
+
+const (
+	StateNew ConnState = iota
+	StateClosed
+)
+
+type ConnStateHandler interface {
+	HandleConnState(conn BufferedConn, state ConnState)
+}
+
+type ConnStateHandlerFunc func(conn BufferedConn, state ConnState)
+
+func (fn ConnStateHandlerFunc) HandleConnState(conn BufferedConn, state ConnState) { fn(conn, state) }
+
+var DefaultConnStateHandler ConnStateHandlerFunc = func(conn BufferedConn, state ConnState) {}
+
 type Handler interface {
 	HandleMessage(ctx *Context) error
 }

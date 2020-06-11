@@ -14,7 +14,8 @@ var DefaultHandshakeTimeout = 3 * time.Second
 var DefaultMaxConnWaitTimeout = 3 * time.Second
 
 type Server struct {
-	Handler Handler
+	Handler   Handler
+	ConnState ConnStateHandler
 
 	Handshaker       Handshaker
 	HandshakeTimeout time.Duration
@@ -46,6 +47,13 @@ func (s *Server) getHandler() Handler {
 		return DefaultHandler
 	}
 	return s.Handler
+}
+
+func (s *Server) getConnStateHandler() ConnStateHandler {
+	if s.ConnState == nil {
+		return DefaultConnStateHandler
+	}
+	return s.ConnState
 }
 
 func (s *Server) getHandshaker() Handshaker {
@@ -169,7 +177,11 @@ func (s *Server) client(conn net.Conn) error {
 		WriteTimeout:    s.getWriteTimeout(),
 	}
 
+	s.getConnStateHandler().HandleConnState(bufConn, StateNew)
+
 	cc.close(cc.Handle(s.done, bufConn))
+
+	s.getConnStateHandler().HandleConnState(bufConn, StateClosed)
 
 	return nil
 }
