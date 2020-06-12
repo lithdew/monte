@@ -373,7 +373,6 @@ func (c *Conn) close(err error) {
 		pr.wg.Done()
 
 		delete(c.reqs, seq)
-		releasePendingRequest(pr)
 	}
 
 	c.seq = 0

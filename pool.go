@@ -52,7 +52,7 @@ func acquirePendingWrite(buf *bytebufferpool.ByteBuffer, wait bool) *pendingWrit
 	return pw
 }
 
-func releasePendingWrite(pw *pendingWrite) { pendingWritePool.Put(pw) }
+func releasePendingWrite(pw *pendingWrite) { pw.err = nil; pendingWritePool.Put(pw) }
 
 type pendingRequest struct {
 	dst []byte         // dst to copy response to
@@ -72,7 +72,11 @@ func acquirePendingRequest(dst []byte) *pendingRequest {
 	return pr
 }
 
-func releasePendingRequest(pr *pendingRequest) { pendingRequestPool.Put(pr) }
+func releasePendingRequest(pr *pendingRequest) {
+	pr.dst = nil
+	pr.err = nil
+	pendingRequestPool.Put(pr)
+}
 
 var zeroTime time.Time
 
