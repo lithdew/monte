@@ -293,29 +293,39 @@ func (c *Conn) writeLoop(conn BufferedConn) error {
 		}
 	}
 
+	if err != nil {
+		err = fmt.Errorf("write_loop: %w", err)
+	}
+
 	return err
 }
 
 func (c *Conn) readLoop(conn BufferedConn) error {
 	buf := make([]byte, c.getReadBufferSize())
 
+	var (
+		n   int
+		err error
+	)
+
 	for {
 		timeout := c.getReadTimeout()
 		if timeout > 0 {
-			err := conn.SetReadDeadline(time.Now().Add(timeout))
+			err = conn.SetReadDeadline(time.Now().Add(timeout))
 			if err != nil {
-				return err
+				break
 			}
 		}
 
-		n, err := conn.Read(buf)
+		n, err = conn.Read(buf)
 		if err != nil {
-			return err
+			break
 		}
 
 		data := buf[:n]
 		if len(data) < 4 {
-			return fmt.Errorf("no sequence number to decode: %w", io.ErrUnexpectedEOF)
+			err = fmt.Errorf("no sequence number to decode: %w", io.ErrUnexpectedEOF)
+			break
 		}
 
 		seq := bytesutil.Uint32BE(data)
@@ -329,9 +339,10 @@ func (c *Conn) readLoop(conn BufferedConn) error {
 		c.mu.Unlock()
 
 		if seq == 0 || !exists {
-			err := c.call(seq, data)
+			err = c.call(seq, data)
 			if err != nil {
-				return fmt.Errorf("handler encountered an error: %w", err)
+				err = fmt.Errorf("handler encountered an error: %w", err)
+				break
 			}
 			continue
 		}
@@ -343,6 +354,12 @@ func (c *Conn) readLoop(conn BufferedConn) error {
 
 		pr.wg.Done()
 	}
+
+	if err != nil {
+		err = fmt.Errorf("read_loop: %w", err)
+	}
+
+	return err
 }
 
 func (c *Conn) call(seq uint32, data []byte) error {
