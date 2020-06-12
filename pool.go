@@ -32,25 +32,6 @@ func acquireContext(conn *Conn, seq uint32, buf []byte) *Context {
 
 func releaseContext(ctx *Context) { contextPool.Put(ctx) }
 
-type pendingRequest struct {
-	dst []byte         // dst to copy response to
-	wg  sync.WaitGroup // signals the caller that the response has been received
-}
-
-var pendingRequestPool sync.Pool
-
-func acquirePendingRequest(dst []byte) *pendingRequest {
-	v := pendingRequestPool.Get()
-	if v == nil {
-		v = &pendingRequest{}
-	}
-	pr := v.(*pendingRequest)
-	pr.dst = dst
-	return pr
-}
-
-func releasePendingRequest(pr *pendingRequest) { pendingRequestPool.Put(pr) }
-
 type pendingWrite struct {
 	buf  *bytebufferpool.ByteBuffer // payload
 	wait bool                       // signal to caller if they're waiting
@@ -72,6 +53,26 @@ func acquirePendingWrite(buf *bytebufferpool.ByteBuffer, wait bool) *pendingWrit
 }
 
 func releasePendingWrite(pw *pendingWrite) { pendingWritePool.Put(pw) }
+
+type pendingRequest struct {
+	dst []byte         // dst to copy response to
+	err error          // error while waiting for response
+	wg  sync.WaitGroup // signals the caller that the response has been received
+}
+
+var pendingRequestPool sync.Pool
+
+func acquirePendingRequest(dst []byte) *pendingRequest {
+	v := pendingRequestPool.Get()
+	if v == nil {
+		v = &pendingRequest{}
+	}
+	pr := v.(*pendingRequest)
+	pr.dst = dst
+	return pr
+}
+
+func releasePendingRequest(pr *pendingRequest) { pendingRequestPool.Put(pr) }
 
 var zeroTime time.Time
 

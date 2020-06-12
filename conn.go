@@ -114,7 +114,7 @@ func (c *Conn) Request(dst []byte, payload []byte) ([]byte, error) {
 
 	pr.wg.Wait()
 
-	return pr.dst, nil
+	return pr.dst, pr.err
 }
 
 func (c *Conn) init() {
@@ -369,6 +369,7 @@ func (c *Conn) close(err error) {
 
 	for seq := range c.reqs {
 		pr := c.reqs[seq]
+		pr.err = err
 		pr.wg.Done()
 
 		delete(c.reqs, seq)
