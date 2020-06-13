@@ -241,9 +241,10 @@ func (c *Conn) next() uint32 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.seq += c.getSeqDelta()
 	if c.seq == 0 {
 		c.seq = c.getSeqOffset()
+	} else {
+		c.seq += c.getSeqDelta()
 	}
 	return c.seq
 }
