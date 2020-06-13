@@ -53,33 +53,7 @@ type Client struct {
 	conns []*clientConn
 }
 
-func (c *Client) Send(buf []byte) error {
-	c.once.Do(c.init)
-
-	cc := c.getClientConn()
-
-	<-cc.ready
-	if cc.err != nil {
-		return cc.err
-	}
-
-	return cc.conn.Send(buf)
-}
-
-func (c *Client) SendNoWait(buf []byte) error {
-	c.once.Do(c.init)
-
-	cc := c.getClientConn()
-
-	<-cc.ready
-	if cc.err != nil {
-		return cc.err
-	}
-
-	return cc.conn.SendNoWait(buf)
-}
-
-func (c *Client) Request(dst, buf []byte) ([]byte, error) {
+func (c *Client) Get() (*Conn, error) {
 	c.once.Do(c.init)
 
 	cc := c.getClientConn()
@@ -89,7 +63,31 @@ func (c *Client) Request(dst, buf []byte) ([]byte, error) {
 		return nil, cc.err
 	}
 
-	return cc.conn.Request(dst, buf)
+	return cc.conn, nil
+}
+
+func (c *Client) Send(buf []byte) error {
+	conn, err := c.Get()
+	if err != nil {
+		return err
+	}
+	return conn.Send(buf)
+}
+
+func (c *Client) SendNoWait(buf []byte) error {
+	conn, err := c.Get()
+	if err != nil {
+		return err
+	}
+	return conn.SendNoWait(buf)
+}
+
+func (c *Client) Request(dst, buf []byte) ([]byte, error) {
+	conn, err := c.Get()
+	if err != nil {
+		return nil, err
+	}
+	return conn.Request(dst, buf)
 }
 
 func (c *Client) NumPendingWrites() int {
