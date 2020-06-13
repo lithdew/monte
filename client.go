@@ -13,8 +13,8 @@ var DefaultWriteBufferSize = 4096
 var DefaultDialTimeout = 3 * time.Second
 var DefaultReadTimeout = 3 * time.Second
 var DefaultWriteTimeout = 3 * time.Second
-var DefaultClientSeqDelta uint32 = 2
 var DefaultClientSeqOffset uint32 = 1
+var DefaultClientSeqDelta uint32 = 2
 
 type clientConn struct {
 	conn  *Conn

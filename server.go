@@ -13,8 +13,8 @@ var DefaultMaxServerConns = 1024
 var DefaultHandshakeTimeout = 3 * time.Second
 var DefaultMaxConnWaitTimeout = 3 * time.Second
 
-var DefaultServerSeqDelta uint32 = 2
 var DefaultServerSeqOffset uint32 = 2
+var DefaultServerSeqDelta uint32 = 2
 
 type Server struct {
 	Handler   Handler
