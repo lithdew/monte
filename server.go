@@ -13,6 +13,9 @@ var DefaultMaxServerConns = 1024
 var DefaultHandshakeTimeout = 3 * time.Second
 var DefaultMaxConnWaitTimeout = 3 * time.Second
 
+var DefaultServerSeqDelta uint32 = 2
+var DefaultServerSeqOffset uint32 = 2
+
 type Server struct {
 	Handler   Handler
 	ConnState ConnStateHandler
@@ -28,6 +31,9 @@ type Server struct {
 
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
+
+	SeqOffset uint32
+	SeqDelta  uint32
 
 	once sync.Once
 	mu   sync.Mutex
@@ -112,6 +118,20 @@ func (s *Server) getWriteBufferSize() int {
 	return s.WriteBufferSize
 }
 
+func (s *Server) getSeqOffset() uint32 {
+	if s.SeqOffset == 0 {
+		return DefaultServerSeqOffset
+	}
+	return s.SeqOffset
+}
+
+func (s *Server) getSeqDelta() uint32 {
+	if s.SeqDelta == 0 {
+		return DefaultServerSeqDelta
+	}
+	return s.SeqDelta
+}
+
 func (s *Server) serverAvailable() bool {
 	select {
 	case <-s.done:
@@ -170,6 +190,8 @@ func (s *Server) client(conn net.Conn) error {
 	}
 
 	cc := &Conn{
+		SeqOffset:       s.getSeqOffset(),
+		SeqDelta:        s.getSeqDelta(),
 		Handler:         s.getHandler(),
 		ReadBufferSize:  s.getReadBufferSize(),
 		WriteBufferSize: s.getWriteBufferSize(),

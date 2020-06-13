@@ -13,6 +13,8 @@ var DefaultWriteBufferSize = 4096
 var DefaultDialTimeout = 3 * time.Second
 var DefaultReadTimeout = 3 * time.Second
 var DefaultWriteTimeout = 3 * time.Second
+var DefaultClientSeqDelta uint32 = 2
+var DefaultClientSeqOffset uint32 = 1
 
 type clientConn struct {
 	conn  *Conn
@@ -38,6 +40,9 @@ type Client struct {
 	DialTimeout  time.Duration
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
+
+	SeqOffset uint32
+	SeqDelta  uint32
 
 	once     sync.Once
 	shutdown sync.Once
@@ -129,6 +134,8 @@ func (c *Client) newClientConn() *clientConn {
 	cc := &clientConn{
 		ready: make(chan struct{}),
 		conn: &Conn{
+			SeqOffset:       c.getSeqOffset(),
+			SeqDelta:        c.getSeqDelta(),
 			Handler:         c.getHandler(),
 			ReadBufferSize:  c.getReadBufferSize(),
 			WriteBufferSize: c.getWriteBufferSize(),
@@ -288,4 +295,17 @@ func (c *Client) getWriteTimeout() time.Duration {
 		return DefaultWriteTimeout
 	}
 	return c.WriteTimeout
+}
+
+func (c *Client) getSeqOffset() uint32 {
+	if c.SeqOffset == 0 {
+		return DefaultClientSeqOffset
+	}
+	return c.SeqOffset
+}
+func (c *Client) getSeqDelta() uint32 {
+	if c.SeqDelta == 0 {
+		return DefaultClientSeqDelta
+	}
+	return c.SeqDelta
 }

@@ -10,6 +10,9 @@ import (
 	"time"
 )
 
+var DefaultSeqOffset uint32 = 1
+var DefaultSeqDelta uint32 = 2
+
 type Conn struct {
 	Handler Handler
 
@@ -18,6 +21,9 @@ type Conn struct {
 
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
+
+	SeqOffset uint32
+	SeqDelta  uint32
 
 	mu   sync.Mutex
 	once sync.Once
@@ -217,13 +223,27 @@ func (c *Conn) getWriteTimeout() time.Duration {
 	return c.WriteTimeout
 }
 
+func (c *Conn) getSeqOffset() uint32 {
+	if c.SeqOffset == 0 {
+		return DefaultSeqOffset
+	}
+	return c.SeqOffset
+}
+
+func (c *Conn) getSeqDelta() uint32 {
+	if c.SeqDelta == 0 {
+		return DefaultSeqDelta
+	}
+	return c.SeqDelta
+}
+
 func (c *Conn) next() uint32 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.seq++
+	c.seq += c.getSeqDelta()
 	if c.seq == 0 {
-		c.seq = 1
+		c.seq = c.getSeqOffset()
 	}
 	return c.seq
 }
@@ -355,11 +375,7 @@ func (c *Conn) readLoop(conn BufferedConn) error {
 		pr.wg.Done()
 	}
 
-	if err != nil {
-		err = fmt.Errorf("read_loop: %w", err)
-	}
-
-	return err
+	return fmt.Errorf("read_loop: %w", err)
 }
 
 func (c *Conn) call(seq uint32, data []byte) error {
