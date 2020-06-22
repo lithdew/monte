@@ -21,6 +21,9 @@ var _ BufferedConn = (*SessionConn)(nil)
 // via a provided cipher.AEAD suite for a given conn that implements net.Conn. It assumes
 // all packets sent/received are to be prefixed with a 32-bit unsigned integer that
 // designates the length of each individual packet.
+//
+// The same cipher.AEAD suite must not be used for multiple SessionConn instances. Doing
+// so will cause for plaintext data to be leaked.
 type SessionConn struct {
 	suite cipher.AEAD
 	conn  net.Conn
@@ -105,31 +108,8 @@ func (s *SessionConn) SetWriteDeadline(t time.Time) error { return s.conn.SetWri
 // Session is not safe for concurrent use.
 type Session struct {
 	suite     cipher.AEAD
-	ourPub    []byte
-	ourPriv   []byte
 	theirPub  []byte
 	sharedKey []byte
-}
-
-func NewSession() (Session, error) {
-	var session Session
-
-	publicKey, privateKey, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		return session, err
-	}
-
-	sessionPub, ok := x25519.EdPublicKeyToX25519(publicKey)
-	if !ok {
-		return session, errors.New("unable to derive ed25519 key to x25519 key")
-	}
-
-	sessionPriv := x25519.EdPrivateKeyToX25519(privateKey)
-
-	session.ourPub = sessionPub
-	session.ourPriv = sessionPriv
-
-	return session, nil
 }
 
 func (s *Session) Suite() cipher.AEAD {
@@ -140,30 +120,54 @@ func (s *Session) SharedKey() []byte {
 	return s.sharedKey
 }
 
+func (s *Session) GenerateEphemeralKeys() ([]byte, []byte, error) {
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ourPub, ok := x25519.EdPublicKeyToX25519(publicKey)
+	if !ok {
+		return nil, nil, errors.New("unable to derive ed25519 key to x25519 key")
+	}
+
+	ourPriv := x25519.EdPrivateKeyToX25519(privateKey)
+
+	return ourPub, ourPriv, nil
+}
+
 func (s *Session) DoClient(conn net.Conn) error {
-	err := s.Write(conn)
+	ourPub, ourPriv, err := s.GenerateEphemeralKeys()
+	if err != nil {
+		return err
+	}
+	err = s.Write(conn, ourPub)
 	if err == nil {
 		err = s.Read(conn)
 	}
 	if err == nil {
-		err = s.Establish()
+		err = s.Establish(ourPriv)
 	}
 	return err
 }
 
 func (s *Session) DoServer(conn net.Conn) error {
-	err := s.Read(conn)
+	ourPub, ourPriv, err := s.GenerateEphemeralKeys()
+	if err != nil {
+		return err
+	}
+	err = s.Read(conn)
 	if err == nil {
-		err = s.Write(conn)
+		err = s.Write(conn, ourPub)
 	}
 	if err == nil {
-		err = s.Establish()
+		err = s.Establish(ourPriv)
 	}
 	return err
 }
 
-func (s *Session) Write(conn net.Conn) error {
-	err := Write(conn, s.ourPub)
+func (s *Session) Write(conn net.Conn, ourPub []byte) error {
+	err := Write(conn, ourPub)
 	if err != nil {
 		return fmt.Errorf("failed to write session public key: %w", err)
 	}
@@ -179,11 +183,11 @@ func (s *Session) Read(conn net.Conn) error {
 	return nil
 }
 
-func (s *Session) Establish() error {
+func (s *Session) Establish(ourPriv []byte) error {
 	if s.theirPub == nil {
 		return errors.New("did not read peer session public key yet")
 	}
-	sharedKey, err := x25519.X25519(s.ourPriv, s.theirPub)
+	sharedKey, err := x25519.X25519(ourPriv, s.theirPub)
 	if err != nil {
 		return fmt.Errorf("failed to derive shared session key: %w", err)
 	}

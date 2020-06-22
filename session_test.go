@@ -9,13 +9,6 @@ import (
 	"testing"
 )
 
-func newTestSession(t testing.TB) Session {
-	t.Helper()
-	sess, err := NewSession()
-	require.NoError(t, err)
-	return sess
-}
-
 func TestSessionConn(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
@@ -25,8 +18,8 @@ func TestSessionConn(t *testing.T) {
 		require.NoError(t, bob.Close())
 	}()
 
-	a := newTestSession(t)
-	b := newTestSession(t)
+	var a Session
+	var b Session
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -68,8 +61,8 @@ func TestSessionConn(t *testing.T) {
 func TestSession(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	aliceSession := newTestSession(t)
-	bobSession := newTestSession(t)
+	var aliceSession Session
+	var bobSession Session
 
 	bob, err := net.Listen("tcp", ":0")
 	require.NoError(t, err)

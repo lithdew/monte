@@ -22,9 +22,7 @@ func main() {
 	check(err)
 	defer conn.Close()
 
-	sess, err := monte.NewSession()
-	check(err)
-
+	var sess monte.Session
 	check(sess.DoServer(conn))
 
 	fmt.Println(hex.EncodeToString(sess.SharedKey()))
