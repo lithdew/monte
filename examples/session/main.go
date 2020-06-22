@@ -14,6 +14,25 @@ func main() {
 		}
 	}
 
+	go func() {
+		conn, err := net.Dial("tcp", ":4444")
+
+		sess, err := monte.NewSession()
+		check(err)
+
+		check(sess.DoClient(conn))
+		fmt.Println(hex.EncodeToString(sess.SharedKey()))
+
+		sc := monte.NewSessionConn(sess.Suite(), conn)
+
+		for i := 0; i < 100; i++ {
+			_, err = sc.Write([]byte(fmt.Sprintf("[%d] Hello from Go!", i)))
+			check(err)
+			check(sc.Flush())
+		}
+
+	}()
+
 	ln, err := net.Listen("tcp", ":4444")
 	check(err)
 	defer ln.Close()
@@ -36,11 +55,5 @@ func main() {
 		check(err)
 
 		fmt.Println("Decrypted:", string(buf[:n]))
-	}
-
-	for i := 0; i < 100; i++ {
-		_, err = sc.Write([]byte(fmt.Sprintf("[%d] Hello from Go!", i)))
-		check(err)
-		check(sc.Flush())
 	}
 }
